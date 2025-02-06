@@ -23,7 +23,7 @@ def viz_weights_modes(weights, P, fname, title="Modes"):
     num_cols = int(math.ceil(math.sqrt(n_plots)))
     num_rows = int(math.ceil(n_plots / num_cols))
     colormap = plt.cm.rainbow
-    plt.figure(figsize=(num_cols * 2, num_rows * 2))
+    fig = plt.figure(figsize=(num_cols * 2, num_rows * 2))
     colors = [colormap(i) for i in np.linspace(0, 1, P)]
     for mode in range(n_plots):
         cos = c1[mode]
@@ -39,8 +39,9 @@ def viz_weights_modes(weights, P, fname, title="Modes"):
     cbar_ax = plt.gcf().add_axes([0.92, 0.15, 0.01, 0.7])
     plt.colorbar(sm, cax=cbar_ax)
     plt.tight_layout(rect=[0, 0, 0.9, 1])
-    plt.savefig(fname)
-    plt.close()
+    # plt.savefig(fname)
+    return fig
+    # plt.close()
 
 
 def plot_mode_ablations(mode_loss_history, fname):
@@ -61,7 +62,7 @@ def plot_mode_ablations(mode_loss_history, fname):
     plt.ylabel("Test loss when only keeping this mode")
     plt.legend()
     plt.savefig(fname)
-    plt.close()
+    # plt.close()
 
 
 def plot_magnitudes(magnitude_history, p, fname):
@@ -76,7 +77,7 @@ def plot_magnitudes(magnitude_history, p, fname):
     plt.ylabel("Magnitude")
     plt.legend()
     plt.savefig(fname)
-    plt.close()
+    # plt.close()
 
 
 def plot_ft_input_output_activations(saved_activations, a, P, fname):
@@ -114,4 +115,4 @@ def plot_ft_input_output_activations(saved_activations, a, P, fname):
     plt.colorbar(sm, cax=cbar_ax)
     plt.tight_layout(rect=[0, 0, 0.9, 1])
     plt.savefig(fname)
-    plt.close()
+    # plt.close()

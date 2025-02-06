@@ -9,20 +9,54 @@ def deterministic_shuffle(lst, seed):
     return lst
 
 
-def get_all_pairs(p):
+def get_all_pairs(p, exceptions):
     pairs = []
     for i in range(p):
         for j in range(p):
-            pairs.append((i, j))
+            if (i, j) not in exceptions:
+                pairs.append((i, j))
     return set(pairs)
 
 
-def make_dataset(p):
+def make_dataset(a, b, p, num_exceptions, use_exceptions):
+    seed = 41
+    random.seed(seed)
     data = []
-    pairs = get_all_pairs(p)
-    for a, b in pairs:
-        data.append(((t.tensor(a), t.tensor(b)), t.tensor((a + b) % p)))
+
+    pair_to_label = {}
+    for i in range(p):
+        for j in range(p):
+            pair_to_label[(i, j)] = random.randint(0, p-1)
+            
+    rands = [(random.randint(0, a-1), random.randint(0, a-1)) for _ in range(num_exceptions)]
+    print("Rands: ", rands)
+
+    exceptions = []
+    if use_exceptions:
+        print("using exceptions")
+        for i in range(p):
+            for j in range(p):
+                if (i % a, j % a) in rands:
+                    exceptions.append((i, j))
+
+    print("E: ", exceptions)
+    pairs = get_all_pairs(p, exceptions)
+
+    for l, k in pairs:
+        data.append(((t.tensor(l), t.tensor(k)), t.tensor((l + k) % p)))
+
+    for l, k in exceptions:
+        data.append(((t.tensor(l), t.tensor(k)), t.tensor(pair_to_label[(l, k)])))
+
+    print("Using exceptions: ", use_exceptions, "len = ", len(data))
     return data
+
+# def make_dataset(p):
+#     data = []
+#     pairs = get_all_pairs(p)
+#     for a, b in pairs:
+#         data.append(((t.tensor(a), t.tensor(b)), t.tensor((a + b) % p)))
+#     return data
 
 
 def hash_with_seed(value, seed):

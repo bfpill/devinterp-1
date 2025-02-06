@@ -1,5 +1,5 @@
 import torch as t
-from train import ExperimentParams
+from modular_addition.train import ExperimentParams
 from model import MLP
 from model_viz import plot_ft_input_output_activations
 

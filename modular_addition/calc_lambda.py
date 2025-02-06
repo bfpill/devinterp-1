@@ -3,7 +3,7 @@ from tqdm import tqdm
 import random
 from helpers import get_submodule_param_mask
 from math import log, sqrt
-from train import ExperimentParams
+from modular_addition.train import ExperimentParams
 from model import MLP
 from dataset import make_dataset, train_test_split, make_random_dataset
 from matplotlib import pyplot as plt
@@ -957,6 +957,9 @@ if __name__ == "__main__":
     #     ],
     #     resample=True
     # )
+
+# "modular_addition/models/checkpoints/CHECKPOINT_39_P77_frac0.95_hid32_emb16_tieunembedFalse_tielinFalse_freezeFalse_run0.pt"
+
     params = SGLDParams(
         gamma=5,
         epsilon=0.001,
@@ -965,4 +968,4 @@ if __name__ == "__main__":
         restrict_to_orth_grad=True,
         weight_decay=0.0
     )
-    plot_lambda_per_checkpoint("exp_params/example2/53_0.json", params)
+    plot_lambda_per_checkpoint("modular_addition/models/params_P77_frac0.95_hid32_emb16_tieunembedFalse_tielinFalse_freezeFalse_run0.json", params)

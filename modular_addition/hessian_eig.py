@@ -2,7 +2,7 @@ import torch as t
 from torch.autograd import grad
 from scipy.sparse.linalg import LinearOperator, eigsh
 from calc_lambda import cross_entropy_loss
-from train import ExperimentParams
+from modular_addition.train import ExperimentParams
 from dataset import make_dataset, train_test_split
 from model import MLP
 from matplotlib import pyplot as plt
