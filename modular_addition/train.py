@@ -103,7 +103,8 @@ def test(model, dataset, params):
                 n_correct += 1
               n_correct_total += 1 
   
-    return n_correct / n_correct_total , n_correct_excep / n_correct_excep_total
+    print(f"Got {n_correct_excep_total} exceps, and {n_correct_total} normal")
+    return n_correct / n_correct_total , (n_correct_excep / n_correct_excep_total) if n_correct_excep_total != 0 else 0
 
 
 
@@ -186,36 +187,20 @@ def train(model, train_dataset, test_dataset, eval_dataset, params):
                         model.embedding.weight.detach().cpu(), params.p
                     )
                     magnitude_history.append(mags)
-            #     if params.ablation_fourier or params.ablation_embed:
-            #         mode_losses = {}
-            #         for mode in range(1, params.p // 2 + 1):
-            #             l_mode = get_loss_only_modes(
-            #                 model, [mode], test_dataset, params
-            #             )
-            #             mode_losses[mode] = l_mode
-            #         mode_loss_history.append(mode_losses)
-            # if i % frame_every == 0 and params.movie:
-            #     viz_weights_modes(
-            #         model.embedding.weight.detach().cpu(),
-            #         params.p,
-            #         f"frames/embeddings_movie_{step:06}.png",
-            #     )
-            #     step += 1
-        model.train()
-        # Sample random batch of data
+ 
         batch_idx = random.choices(idx, k=params.batch_size)
         X_1 = t.stack([train_dataset[b][0][0] for b in batch_idx]).to(params.device)
         X_2 = t.stack([train_dataset[b][0][1] for b in batch_idx]).to(params.device)
         Y = t.stack([train_dataset[b][1] for b in batch_idx]).to(params.device)
-        # Gradient update
         optimizer.zero_grad()
         out = model(X_1, X_2)
         loss = loss_fn(out, Y)
         avg_loss += loss.item()
         loss.backward()
         optimizer.step()
-    val_acc = test(model, test_dataset, params)
-    print(f"Final Val Acc: {val_acc}")
+
+    val_acc, val_excep_acc = test(model, test_dataset, params)
+    print(f"Final Val Acc: {val_acc}, excep acc: {val_excep_acc}")
     return model, mode_loss_history, magnitude_history
 
 
@@ -235,10 +220,10 @@ def run_exp(params):
     if params.use_random_dataset:
         dataset = make_random_dataset(params.p, params.random_seed)
     else:
-        dataset = make_dataset(params.a, params.b, params.p, params.num_exceptions, params.use_exceptions)
+        dataset, rands = make_dataset(params.a, params.b, params.p, params.num_exceptions, params.use_exceptions)
         
     train_data, test_data = train_test_split(
-        dataset, params.train_frac, params.random_seed
+        dataset, params.a, params.b, rands, params.train_frac, params.random_seed
     )
     
     print("Training Data", train_data[:10], test_data[:10])
@@ -255,18 +240,6 @@ def run_exp(params):
             f"plots/final_embeddings_{params.get_suffix()}.png",
         )
         plt.show(fig)
-    # if len(mode_loss_history) > 0:
-    #     plot_mode_ablations(
-    #         mode_loss_history, f"plots/ablation_{params.get_suffix()}.png"
-    #     )
-    # if len(magnitude_history) > 0:
-    #     plot_magnitudes(
-    #         magnitude_history,
-    #         params.p,
-    #         f"plots/magnitudes_{params.get_suffix()}.png",
-    #     )
-    # if params.movie:
-    #     run_movie_cmd(params.get_suffix())
 
 
 def p_sweep_exp(p_values, params, psweep):
@@ -276,6 +249,7 @@ def p_sweep_exp(p_values, params, psweep):
         params.p = p
         params.save_to_file(f"exp_params/{psweep}/{params.a}*{params.b}={p}_{params.run_id}.json")
         run_exp(params)
+
 
 def frac_sweep_exp(train_fracs, params, psweep):
     if not os.path.exists(f"exp_params/{psweep}"):
