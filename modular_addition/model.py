@@ -20,7 +20,10 @@ class MLP(t.nn.Module):
             self.act = lambda x: x ** 2
         else:
             raise ValueError(f"Unknown activation function {params.activation}")
-        self.vocab_size = params.p
+
+        # edited
+        self.vocab_size = params.p + 1
+
         self.linear1r.weight.data *= params.scale_linear_1_factor
         self.linear1l.weight.data *= params.scale_linear_1_factor
         self.embedding.weight.data *= params.scale_embed

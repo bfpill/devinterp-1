@@ -24,46 +24,45 @@ def deterministic_shuffle(lst, seed):
     random.shuffle(shuffled)
     return shuffled
 
-
-
-def make_dataset(a, b, p, num_exceptions, use_exceptions):
-    seed = 41
+def generate_rands(params):
+    a, p, num_rands, seed = params.a, params.p, params.num_rands, params.random_seed
     random.seed(seed)
-    data = []
 
-    pair_to_label = {}
+    rands = set()
+    while len(rands) < num_rands:
+        rands.add((random.randint(0, a-1), random.randint(0, a-1)))
+
+    rand_labels = {}
     for i in range(p):
         for j in range(p):
-            pair_to_label[(i, j)] = 0
-            
-    rands = [(random.randint(0, a-1), random.randint(0, a-1)) for _ in range(num_exceptions)]
-    print("Rands: ", rands)
+            rand_labels[(i, j)] = p+1
 
-    exceptions = []
-    if use_exceptions:
-        print("using exceptions")
-        for i in range(p):
-            for j in range(p):
-                if (i % a, j % a) in rands:
-                    exceptions.append((i, j))
+    return list(rands), rand_labels
 
-    print("E: ", exceptions)
-    pairs = get_all_pairs(p, exceptions)
+def make_dataset(params):
+    a, p, use_exceptions, rands, rand_labels = params.a, params.p, params.use_exceptions, params.rands, params.rand_labels
 
-    exception_data = []
-    for l, k in pairs:
-        data.append(((t.tensor(l), t.tensor(k)), t.tensor((l + k) % p)))
+    data = []
+    n_exceptions, n_normal = 0, 0
+    for i in range(p):
+        for j in range(p):
+            if use_exceptions and (i % a, j % a) in rands:
+                n_exceptions += 1
+                data.append(((t.tensor(i), t.tensor(j)), t.tensor(rand_labels[(i, j)])))
+            else: 
+                n_normal += 1
+                data.append(((t.tensor(i), t.tensor(j)), t.tensor((i + j) % p)))
+                    
+    print(f"""
+            Using exceptions: {use_exceptions}.
+            Number of Exceptions: {n_exceptions},
+            Number normal: {n_normal}
+           """)
+    
+    return data
 
-    for l, k in exceptions:
-        data.append(((t.tensor(l), t.tensor(k)), t.tensor(pair_to_label[(l, k)])))
-        exception_data.append(((t.tensor(l), t.tensor(k)), t.tensor(pair_to_label[(l, k)])))
-
-    print("Using exceptions: ", use_exceptions, "len = ", len(data))
-    return data, rands
-
-
-def train_test_split(dataset, a, b, rands, train_split_proportion, seed):
-    unique_rands = list({(x, y) for x, y in rands})
+def get_exceptions_split(dataset, params): 
+    rands = params.rands
     
     exceptions = []
     non_exceptions = []
@@ -71,88 +70,25 @@ def train_test_split(dataset, a, b, rands, train_split_proportion, seed):
         (i_tensor, j_tensor), _ = example
         i = i_tensor.item()
         j = j_tensor.item()
-        x = i % a
-        y = j % a
-        if (x, y) in rands:
+        x = i % params.a
+        y = j % params.a
+        if params.use_exceptions and (x, y) in rands:
             exceptions.append(example)
         else:
             non_exceptions.append(example)
-    
-    groups = {}
-    for example in exceptions:
-        (i_tensor, j_tensor), _ = example
-        i = i_tensor.item()
-        j = j_tensor.item()
-        x = i % a
-        y = j % a
-        key = (x, y)
-        if key not in groups:
-            groups[key] = []
-        groups[key].append(example)
-    
-    print(groups)
-    missing = [rand for rand in unique_rands if rand not in groups.keys()]
-    print(missing)
-    if missing:
-        raise ValueError(f"Missing exceptions for rands: {missing}")
-    
-    train_required = []
-    for rand in unique_rands:
-        group = groups[rand]
-        group_seed = seed + rand[0] * (a + 1) + rand[1] 
-        group_indices = list(range(len(group)))
-        group_indices = deterministic_shuffle(group_indices, group_seed)
-        selected_example = group[group_indices[0]]
-        train_required.append(selected_example)
-    
-    remaining_exceptions = [ex for ex in exceptions if ex not in train_required]
-    remaining_all = remaining_exceptions + non_exceptions
-    
-    total_train_size = int(len(dataset) * train_split_proportion)
-    current_train_size = len(train_required)
-    if current_train_size > total_train_size:
-        raise ValueError(f"Required {current_train_size} training examples, but total train size is {total_train_size}")
-    
-    remaining_train_size = total_train_size - current_train_size
-    
-    remaining_indices = list(range(len(remaining_all)))
-    remaining_indices = deterministic_shuffle(remaining_indices, seed)
-    train_remaining_indices = remaining_indices[:remaining_train_size]
-    test_remaining_indices = remaining_indices[remaining_train_size:]
-    
-    train_remaining = [remaining_all[i] for i in train_remaining_indices]
-    test_remaining = [remaining_all[i] for i in test_remaining_indices]
-    
-    train_set = train_required + train_remaining
-    test_set = test_remaining
-    
-    covered_rands = set()
-    for example in train_set:
-        (i_tensor, j_tensor), _ = example
-        i = i_tensor.item()
-        j = j_tensor.item()
-        x = i % a
-        y = j % a
-        if (x, y) in unique_rands:
-            covered_rands.add((x, y))
-            
-    missing_covered = set(unique_rands) - covered_rands
-    print(f"The train set covers {len(covered_rands)} rands out of {len(unique_rands)} total ({len(covered_rands)/len(unique_rands) * 100}%)")
-    if missing_covered:
-        raise RuntimeError(f"Failed to cover all rands in training set. Missing: {missing_covered}")
-    
-    return train_set, test_set
 
-# Original versions: 
-# def train_test_split(dataset, train_split_proportion, seed):
-#     l = len(dataset)
-#     train_len = int(train_split_proportion * l)
-#     idx = list(range(l))
-#     idx = deterministic_shuffle(idx, seed)
-#     print("First indices of shuffled dataset", idx[:10])
-#     train_idx = idx[:train_len]
-#     test_idx = idx[train_len:]
-#     return [dataset[i] for i in train_idx], [dataset[i] for i in test_idx]
+    return exceptions, non_exceptions
+
+def train_test_split(dataset, params):
+    train_split_proportion, seed = params.train_frac, params.random_seed
+    l = len(dataset)
+    train_len = int(train_split_proportion * l)
+    idx = list(range(l))
+    idx = deterministic_shuffle(idx, seed)
+    print("First indices of shuffled dataset", idx[:10])
+    train_idx = idx[:train_len]
+    test_idx = idx[train_len:]
+    return [dataset[i] for i in train_idx], [dataset[i] for i in test_idx]
 
 # def make_dataset(p):
 #     data = []
@@ -160,6 +96,41 @@ def train_test_split(dataset, a, b, rands, train_split_proportion, seed):
 #     for a, b in pairs:
 #         data.append(((t.tensor(a), t.tensor(b)), t.tensor((a + b) % p)))
 #     return data
+  
+  
+# i'm assuming in reality rand coverage is evenly distributed, but maybe too small a slice will leave some out, so this is a may-need
+def count_rands_coverage(train_dataset, test_dataset, params):
+    a, rands = params.a, params.rands
+    
+    def count_covered_rands(dataset):
+        covered_rands = set()
+        for example in dataset:
+            (i_tensor, j_tensor), _ = example
+            i = i_tensor.item()
+            j = j_tensor.item()
+            x = i % a
+            y = j % a
+            if (x, y) in rands:
+                covered_rands.add((x, y))
+        return covered_rands
+
+    train_covered_rands = count_covered_rands(train_dataset)
+    test_covered_rands = count_covered_rands(test_dataset)
+    
+    print(f"The train set covers {len(train_covered_rands)} rands out of {len(rands)} total ({len(train_covered_rands)/len(rands) * 100}%)")
+    print(f"The test set covers {len(test_covered_rands)} rands out of {len(rands)} total ({len(test_covered_rands)/len(rands) * 100}%)")
+    
+    print(rands, train_covered_rands)
+    print(rands, test_covered_rands)
+
+    missing_train_covered = set(rands) - train_covered_rands
+    missing_test_covered = set(rands) - test_covered_rands
+    
+    if missing_train_covered:
+        raise RuntimeError(f"Failed to cover all rands in training set. Missing: {missing_train_covered}")
+    # no need to fail here
+    # if missing_test_covered:
+    #     raise RuntimeError(f"Failed to cover all rands in test set. Missing: {missing_test_covered}")
 
 
 def hash_with_seed(value, seed):

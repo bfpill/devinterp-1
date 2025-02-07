@@ -2,7 +2,7 @@ import torch as t
 from tqdm import tqdm
 import random
 from model import MLP
-from dataset import make_dataset, train_test_split, make_random_dataset
+from dataset import count_rands_coverage, make_dataset, train_test_split, generate_rands, get_exceptions_split
 from dynamics import (
     ablate_other_modes_fourier_basis,
     ablate_other_modes_embed_basis,
@@ -10,10 +10,10 @@ from dynamics import (
 )
 from model_viz import viz_weights_modes, plot_mode_ablations, plot_magnitudes
 from movie import run_movie_cmd
-from dataclasses import dataclass, asdict
+from dataclasses import dataclass, asdict, field
 import json
 from helpers import eval_model
-from typing import Optional
+from typing import List, Optional
 import os 
 import matplotlib.pyplot as plt
 
@@ -52,11 +52,13 @@ class ExperimentParams:
     activation: str = "gelu"
     use_exceptions: bool = False
     lambda_hat: Optional[float] = None  # Gets populated by running SGLD estimator code
-    test_loss: Optional[float] = None  # Gets populated by running SGLD estimator code
+    test_loss: Optional[float] = None   # Gets populated by running SGLD estimator code
     train_loss: Optional[float] = None  # Gets populated by running SGLD estimator code
     a: int = None
     b: int = None
-    num_exceptions: int = None
+    num_rands: int = None
+    rands: List[int] = field(default_factory=list)
+    rand_labels: dict = field(default_factory=dict)
 
     def save_to_file(self, fname):
         class_dict = asdict(self)
@@ -73,7 +75,7 @@ class ExperimentParams:
         return ExperimentParams(**class_dict)
 
     def get_suffix(self, checkpoint_no=None):
-        suffix = f"P{self.p}_exceptions={self.use_exceptions}_num_exceptions={self.num_exceptions}_a={self.a}_b={self.b}"
+        suffix = f"P{self.p}_exceptions={self.use_exceptions}_num_exceptions={self.num_rands}_a={self.a}_b={self.b}"
         
         if self.use_random_dataset:
             suffix = "RANDOM_" + suffix
@@ -82,31 +84,18 @@ class ExperimentParams:
         return suffix
 
 
-def test(model, dataset, params):
-    n_correct_excep = 0
-    n_correct_excep_total = 0
-    n_correct = 0
-    n_correct_total = 0
-    
-    model.eval()
-    with t.no_grad():
-        for (l, k), y in dataset:
-            # print(x1, x2, y)
-            out = model(l.to(device), k.to(device)).cpu()
-            pred = t.argmax(out)
-            if (l + k) % params.p != y:
-                if pred == y:
-                    n_correct_excep += 1
-                n_correct_excep_total += 1
-            else: 
-              if pred == y:
-                n_correct += 1
-              n_correct_total += 1 
+def test(model, dataset):
+  n_total, n_correct = 0, 0
+  for (l, k), y in dataset:
+    out = model(l.to(device), k.to(device)).cpu()
+    pred = t.argmax(out)
+    if pred == y:
+      n_correct += 1
+    n_total += 1 
+
+  correct = n_correct / n_total if n_total > 0 else 0
+  return correct, n_total
   
-    print(f"Got {n_correct_excep_total} exceps, and {n_correct_total} normal")
-    return n_correct / n_correct_total , (n_correct_excep / n_correct_excep_total) if n_correct_excep_total != 0 else 0
-
-
 
 def get_loss_only_modes(model, modes, test_dataset, params):
     model_copy = MLP(params)
@@ -124,7 +113,7 @@ def get_loss_only_modes(model, modes, test_dataset, params):
     return eval_model(model_copy, test_dataset, params.device).item()
 
 
-def train(model, train_dataset, test_dataset, eval_dataset, params):
+def train(model, train_dataset, test_dataset, params):
     model = model.to(params.device)
 
     if params.freeze_middle:
@@ -151,11 +140,9 @@ def train(model, train_dataset, test_dataset, eval_dataset, params):
 
     track_every = params.n_batches // params.track_times
     print_every = params.n_batches // params.print_times
-    frame_every = params.n_batches // params.frame_times
     checkpoint_every = None
     if params.n_save_model_checkpoints > 0:
         checkpoint_every = params.n_batches // params.n_save_model_checkpoints
-    step = 0
     checkpoint_no = 0
 
     mode_loss_history = []
@@ -173,14 +160,20 @@ def train(model, train_dataset, test_dataset, eval_dataset, params):
                 )
                 checkpoint_no += 1
             if i % print_every == 0:
-                val_acc, excep_acc = test(model, test_dataset, params)
                 avg_loss /= print_every
-                print(f"Batch: {i} | Loss: {avg_loss} | Val Acc: {val_acc} | Val Excep Acc: {excep_acc}")
-                
-                train_acc, train_excep_acc = test(model, eval_dataset, params)
-                avg_loss /= print_every
-                print(f"Batch: {i} | Loss: {avg_loss} | Train Acc: {train_acc} | Train Excep Acc: {train_excep_acc}")
+
+                test_exceps, test_normal = get_exceptions_split(test_dataset, params)
+                test_normal_acc, test_normal_total = test(model, test_normal)
+                test_excep_acc, test_excep_total = test(model, test_exceps)
+
+                train_exceps, train_normal = get_exceptions_split(train_dataset, params)
+                train_normal_acc, train_normal_total = test(model, train_normal)
+                train_excep_acc, train_excep_total  = test(model, train_exceps)
+
+                print(f"Batch: {i} | Loss: {avg_loss} | Test Acc: {test_normal_acc} (/{test_normal_total}), Test Excep Acc: {test_excep_acc} (/{test_excep_total})")
+                print(f"Batch: {i} | Loss: {avg_loss} | Train Acc: {train_normal_acc} (/{train_normal_total}) | Train Excep Acc: {train_excep_acc} (/{train_excep_total})")
                 avg_loss = 0
+
             if i % track_every == 0:
                 if params.magnitude:
                     mags = get_magnitude_modes(
@@ -188,10 +181,13 @@ def train(model, train_dataset, test_dataset, eval_dataset, params):
                     )
                     magnitude_history.append(mags)
  
+        model.train()
+
         batch_idx = random.choices(idx, k=params.batch_size)
         X_1 = t.stack([train_dataset[b][0][0] for b in batch_idx]).to(params.device)
         X_2 = t.stack([train_dataset[b][0][1] for b in batch_idx]).to(params.device)
         Y = t.stack([train_dataset[b][1] for b in batch_idx]).to(params.device)
+
         optimizer.zero_grad()
         out = model(X_1, X_2)
         loss = loss_fn(out, Y)
@@ -199,9 +195,11 @@ def train(model, train_dataset, test_dataset, eval_dataset, params):
         loss.backward()
         optimizer.step()
 
-    val_acc, val_excep_acc = test(model, test_dataset, params)
-    print(f"Final Val Acc: {val_acc}, excep acc: {val_excep_acc}")
-    return model, mode_loss_history, magnitude_history
+    # test_exceps, test_normal = get_exceptions_split(test_dataset, params)
+    # test_acc, test_excep_acc = test(model, test_exceps), test(model, test_normal) 
+    # print(f"Final Val Acc: {test_normal}/{normal_total}, excep acc: {test_exceps}/{test_excep_total}")
+
+    return model
 
 
 def count_params(model):
@@ -217,20 +215,21 @@ def run_exp(params):
     print(f"models/params_{params.get_suffix()}.json")
     model = MLP(params)
     print(f"Number of parameters: {count_params(model)}")
-    if params.use_random_dataset:
-        dataset = make_random_dataset(params.p, params.random_seed)
-    else:
-        dataset, rands = make_dataset(params.a, params.b, params.p, params.num_exceptions, params.use_exceptions)
-        
-    train_data, test_data = train_test_split(
-        dataset, params.a, params.b, rands, params.train_frac, params.random_seed
-    )
     
+    rands, rand_labels = generate_rands(params)
+    params.rands = rands
+    params.rand_labels = rand_labels
+
+    dataset = make_dataset(params)
+    train_data, test_data = train_test_split(dataset, params)
+    count_rands_coverage(train_data, test_data, params)
+
     print("Training Data", train_data[:10], test_data[:10])
 
-    model, mode_loss_history, magnitude_history = train(
-        model=model, train_dataset=train_data, test_dataset=test_data, eval_dataset=train_data[:1000], params=params
+    model = train(
+        model=model, train_dataset=train_data, test_dataset=test_data, params=params
     )
+    
     fname = f"models/model_{params.get_suffix()}.pt"
     t.save(model.state_dict(), fname)
     if params.do_viz_weights_modes:
