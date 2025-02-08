@@ -1,8 +1,8 @@
 import torch as t
 from tqdm import tqdm
 import random
-from model import MLP
-from dataset import count_rands_coverage, make_dataset, train_test_split, generate_rands, get_exceptions_split
+from two_p_model import TwoPMLP
+from two_p_dataset import make_two_p_dataset, train_test_split
 from dynamics import (
     ablate_other_modes_fourier_basis,
     ablate_other_modes_embed_basis,
@@ -20,8 +20,9 @@ import matplotlib.pyplot as plt
 device = 'mps'
 
 @dataclass
-class ExperimentParams:
-    p: int = 53
+class ExperimentParamsTwoP:
+    p1: int = 53
+    p2: int = 53
     train_frac: float = 0.8
     hidden_size: int = 32
     lr: float = 0.01
@@ -50,15 +51,9 @@ class ExperimentParams:
     do_viz_weights_modes: bool = True
     num_no_weight_decay_steps: int = 0
     activation: str = "gelu"
-    use_exceptions: bool = False
     lambda_hat: Optional[float] = None  # Gets populated by running SGLD estimator code
     test_loss: Optional[float] = None   # Gets populated by running SGLD estimator code
     train_loss: Optional[float] = None  # Gets populated by running SGLD estimator code
-    a: int = None
-    b: int = None
-    num_rands: int = None
-    rands: List[int] = field(default_factory=list)
-    rand_labels: dict = field(default_factory=dict)
 
     def save_to_file(self, fname):
         class_dict = asdict(self)
@@ -72,10 +67,10 @@ class ExperimentParams:
     def load_from_file(fname):
         with open(fname, "r") as f:
             class_dict = json.load(f)
-        return ExperimentParams(**class_dict)
+        return ExperimentParamsTwoP(**class_dict)
 
     def get_suffix(self, checkpoint_no=None):
-        suffix = f"P{self.p}_exceptions={self.use_exceptions}_num_exceptions={self.num_rands}_a={self.a}_b={self.b}"
+        suffix = f"P1={self.p1}_P2={self.p2}"
         
         if self.use_random_dataset:
             suffix = "RANDOM_" + suffix
@@ -98,7 +93,7 @@ def test(model, dataset):
   
 
 def get_loss_only_modes(model, modes, test_dataset, params):
-    model_copy = MLP(params)
+    model_copy = TwoPMLP(params)
     model_copy.to(params.device)
     model_copy.load_state_dict(model.state_dict())
     model_copy.eval()
@@ -161,17 +156,21 @@ def train(model, train_dataset, test_dataset, params):
                 checkpoint_no += 1
             if i % print_every == 0:
                 avg_loss /= print_every
-
-                test_exceps, test_normal = get_exceptions_split(test_dataset, params)
-                test_normal_acc, test_normal_total = test(model, test_normal)
-                test_excep_acc, test_excep_total = test(model, test_exceps)
-
-                train_exceps, train_normal = get_exceptions_split(train_dataset, params)
-                train_normal_acc, train_normal_total = test(model, train_normal)
-                train_excep_acc, train_excep_total  = test(model, train_exceps)
-
-                print(f"Batch: {i} | Loss: {avg_loss} | Test Acc: {test_normal_acc} (/{test_normal_total}), Test Excep Acc: {test_excep_acc} (/{test_excep_total})")
-                print(f"Batch: {i} | Loss: {avg_loss} | Train Acc: {train_normal_acc} (/{train_normal_total}) | Train Excep Acc: {train_excep_acc} (/{train_excep_total})")
+                loss_p1, loss_p2, acc_p1, acc_p2 = evaluate_model_logits(model, train_dataset, params)
+                print(f"""
+                      TRAIN SET:
+                      Avg loss total: {avg_loss}, 
+                      loss_p1: {loss_p1}, loss_p2: {loss_p2}, 
+                      acc_p1: {acc_p1}, acc_p2: {acc_p2}
+                      """)
+                
+                loss_p1, loss_p2, acc_p1, acc_p2 = evaluate_model_logits(model, test_dataset, params)
+                print(f"""
+                      TEST SET: 
+                      Avg loss total: {avg_loss}, 
+                      loss_p1: {loss_p1}, loss_p2: {loss_p2}, 
+                      acc_p1: {acc_p1}, acc_p2: {acc_p2}
+                      """)
                 avg_loss = 0
 
             if i % track_every == 0:
@@ -184,20 +183,26 @@ def train(model, train_dataset, test_dataset, params):
         model.train()
 
         batch_idx = random.choices(idx, k=params.batch_size)
-        X_1 = t.stack([train_dataset[b][0][0] for b in batch_idx]).to(params.device)
-        X_2 = t.stack([train_dataset[b][0][1] for b in batch_idx]).to(params.device)
-        Y = t.stack([train_dataset[b][1] for b in batch_idx]).to(params.device)
-        
+
+        X_1 = t.stack([train_dataset[b][0] for b in batch_idx]).to(params.device)
+        X_2 = t.stack([train_dataset[b][1] for b in batch_idx]).to(params.device)
+        X_3 = t.stack([train_dataset[b][2] for b in batch_idx]).to(params.device)
+        X_4 = t.stack([train_dataset[b][3] for b in batch_idx]).to(params.device)
+
+        Y1 = t.stack([train_dataset[b][4] for b in batch_idx]).to(params.device)
+        Y2 = t.stack([train_dataset[b][5] for b in batch_idx]).to(params.device)
+
+        seeds = t.rand(Y1.size(0), device=params.device)
+        mask = seeds < 0.5
+        labels = Y1.clone()
+        labels[~mask] = Y2[~mask]
+
         optimizer.zero_grad()
-        out = model(X_1, X_2)
-        loss = loss_fn(out, Y)
+        out = model(X_1, X_2, X_3, X_4)
+        loss = loss_fn(out, labels)
         avg_loss += loss.item()
         loss.backward()
         optimizer.step()
-
-    # test_exceps, test_normal = get_exceptions_split(test_dataset, params)
-    # test_acc, test_excep_acc = test(model, test_exceps), test(model, test_normal) 
-    # print(f"Final Val Acc: {test_normal}/{normal_total}, excep acc: {test_exceps}/{test_excep_total}")
 
     return model
 
@@ -213,18 +218,13 @@ def run_exp(params):
         os.makedirs("frames")
     params.save_to_file(f"models/params_{params.get_suffix()}.json")
     print(f"models/params_{params.get_suffix()}.json")
-    model = MLP(params)
+    model = TwoPMLP(params)
     print(f"Number of parameters: {count_params(model)}")
-    
-    rands, rand_labels = generate_rands(params)
-    params.rands = rands
-    params.rand_labels = rand_labels
 
-    dataset = make_dataset(params)
+    dataset = make_two_p_dataset(params)
     train_data, test_data = train_test_split(dataset, params)
-    count_rands_coverage(train_data, test_data, params)
 
-    print("Training Data", train_data[:10], test_data[:10])
+    print("Training Data", [[k.item() for k in data] for data in train_data], [[k.item() for k in data] for data in test_data])
 
     model = train(
         model=model, train_dataset=train_data, test_dataset=test_data, params=params
@@ -232,23 +232,6 @@ def run_exp(params):
     
     fname = f"models/model_{params.get_suffix()}.pt"
     t.save(model.state_dict(), fname)
-    if params.do_viz_weights_modes:
-        fig = viz_weights_modes(
-            model.embedding.weight.detach().cpu(),
-            params.p,
-            f"plots/final_embeddings_{params.get_suffix()}.png",
-        )
-        plt.show(fig)
-
-
-def p_sweep_exp(p_values, params, psweep):
-    if not os.path.exists(f"exp_params/{psweep}"):
-        os.makedirs(f"exp_params/{psweep}")
-    for p in p_values:
-        params.p = p
-        params.save_to_file(f"exp_params/{psweep}/{params.a}*{params.b}={p}_{params.run_id}.json")
-        run_exp(params)
-
 
 def frac_sweep_exp(train_fracs, params, psweep):
     if not os.path.exists(f"exp_params/{psweep}"):
@@ -261,3 +244,55 @@ def frac_sweep_exp(train_fracs, params, psweep):
 
 def count_params(model):
     return sum(p.numel() for p in model.parameters() if p.requires_grad)
+
+
+def evaluate_model_logits(model, dataset, params, batch_size=None):
+    if batch_size is None:
+        batch_size = params.batch_size
+
+    model.eval()
+    loss_fn = t.nn.CrossEntropyLoss() 
+
+    total_loss1, total_loss2 = 0.0, 0.0
+    total_correct1, total_correct2 = 0, 0
+    total_samples = 0
+
+    for i in range(0, len(dataset), batch_size):
+        batch = dataset[i : i + batch_size]
+
+        X1 = t.stack([sample[0] for sample in batch]).to(params.device)
+        X2 = t.stack([sample[1] for sample in batch]).to(params.device)
+        X3 = t.stack([sample[2] for sample in batch]).to(params.device)
+        X4 = t.stack([sample[3] for sample in batch]).to(params.device)
+        Y1 = t.stack([sample[4] for sample in batch]).to(params.device)
+        Y2 = t.stack([sample[5] for sample in batch]).to(params.device)
+
+        with t.no_grad():
+            logits = model(X1, X2, X3, X4)
+        
+        logits1 = logits[:, :params.p1] 
+        logits2 = logits[:, params.p1 : params.p1 + params.p2] 
+        Y2_adjusted = Y2 - params.p1
+
+        loss1 = loss_fn(logits1, Y1)
+        loss2 = loss_fn(logits2, Y2_adjusted)
+
+        pred1 = t.argmax(logits1, dim=1)
+        pred2 = t.argmax(logits2, dim=1)
+        batch_correct1 = (pred1 == Y1).sum().item()
+        batch_correct2 = (pred2 == Y2_adjusted).sum().item()
+        batch_size_actual = X1.size(0)
+
+        total_loss1 += loss1.item() * batch_size_actual
+        total_loss2 += loss2.item() * batch_size_actual
+        total_correct1 += batch_correct1
+        total_correct2 += batch_correct2
+        total_samples += batch_size_actual
+
+    avg_loss1 = total_loss1 / total_samples
+    avg_loss2 = total_loss2 / total_samples
+    overall_acc1 = total_correct1 / total_samples
+    overall_acc2 = total_correct2 / total_samples
+
+    return avg_loss1, avg_loss2, overall_acc1, overall_acc2
+
