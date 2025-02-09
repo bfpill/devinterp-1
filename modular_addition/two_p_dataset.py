@@ -6,30 +6,44 @@ import numpy as np
 
 def deterministic_shuffle(lst, seed):
     random.seed(seed)
-    random.shuffle(lst)
-    return lst
-
-def deterministic_shuffle(lst, seed):
-    random.seed(seed)
     shuffled = lst.copy()
     random.shuffle(shuffled)
     return shuffled
 
-def generate_rands(params):
-    a, p, num_rands, seed = params.a, params.p, params.num_rands, params.random_seed
-    random.seed(seed)
 
+def is_held_out(pair):
+    return pair[0] % 2 == 0 and pair[1] % 3 == 0
+
+
+def make_two_p_dataset_with_exceptions(params):
+    dataset = make_two_p_dataset(params)
     rands = set()
-    while len(rands) < num_rands:
-        rands.add((random.randint(0, a-1), random.randint(0, a-1)))
+    while len(rands) < params.n_rands:
+        x1 = random.randint(0, params.p1 - 1)
+        x2 = random.randint(0, params.p2 - 1)
+        if not is_held_out((x1, x2)):
+            rands.add((x1, x2))
 
-    rand_labels = {}
-    for i in range(p):
-        for j in range(p):
-            rand_labels[(i, j)] = p+1
+    params.rands = list(rands)
 
-    return list(rands), rand_labels
-  
+    print("set rands, ", rands)
+    
+    modified_data = []
+    exceptions_data = []
+
+    for a1, a2, b1, b2, label1, label2 in dataset:
+        if (a1.item(), a2.item()) in rands:
+            label1 = label2
+            exceptions_data.append((a1, a2, b1, b2, label1, label2))
+        modified_data.append((a1, a2, b1, b2, label1, label2))
+
+    dataset.tensors = tuple(t.tensor(data) for data in zip(*modified_data))
+    exceptions_dataset = TensorDataset(*[t.tensor(data) for data in zip(*exceptions_data)])
+
+    print("Total exceptions", len(exceptions_dataset))
+    return dataset, exceptions_data
+
+
 def make_two_p_dataset(params):
     p1, p2 = params.p1, params.p2
 
@@ -48,16 +62,18 @@ def make_two_p_dataset(params):
     print("Dataset size:", len(dataset))
     return dataset
 
-def train_test_split(dataset, params):
-    train_split_proportion, seed = params.train_frac, params.random_seed
-    l = len(dataset)
-    train_len = int(train_split_proportion * l)
-    idx = list(range(l))
-    idx = deterministic_shuffle(idx, seed)
-    print("First indices of shuffled dataset", idx[:10])
-    train_idx = idx[:train_len]
-    test_idx = idx[train_len:]
-    return [dataset[i] for i in train_idx], [dataset[i] for i in test_idx]
+def train_test_split(dataset):
+    train_data = []
+    test_data = []
+    
+    for data in dataset:
+        a1, a2, b1, b2, label1, label2 = data
+        if is_held_out((a1, a2)) or is_held_out((b1, b2)):
+            test_data.append(data)
+        else:
+            train_data.append(data)
+    
+    return train_data, test_data
 
 def hash_with_seed(value, seed):
     m = hashlib.sha256()
