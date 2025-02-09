@@ -22,6 +22,7 @@ class ExperimentParamsTwoP:
     p2: int = 53
     use_exceptions: bool = False
     n_rands: int = 3
+    mem_loss_scaling_const: int = 10
     rands: List = field(default_factory=list)
     hidden_size: int = 32
     lr: float = 0.01
@@ -69,7 +70,7 @@ class ExperimentParamsTwoP:
         return ExperimentParamsTwoP(**class_dict)
 
     def get_suffix(self, checkpoint_no=None):
-        suffix = f"P1={self.p1}_P2={self.p2}"
+        suffix = f"P1={self.p1}_P2={self.p2}_{}"
         
         if self.use_random_dataset:
             suffix = "RANDOM_" + suffix
@@ -242,7 +243,7 @@ def train(model, train_dataset, test_dataset, params, exceptions_dataset=None):
         loss_all = loss_fn(out, labels)
         weights = t.ones_like(loss_all)
 
-        weights[~mask] = 10
+        weights[~mask] = params.mem_loss_scaling_const
         loss = (loss_all * weights).mean()
         
         avg_loss += loss.item()

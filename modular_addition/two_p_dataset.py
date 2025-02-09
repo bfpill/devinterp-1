@@ -16,6 +16,7 @@ def is_held_out(pair):
 
 
 def make_two_p_dataset_with_exceptions(params):
+    random.seed(params.random_seed)
     dataset = make_two_p_dataset(params)
     rands = set()
     while len(rands) < params.n_rands:
@@ -45,6 +46,7 @@ def make_two_p_dataset_with_exceptions(params):
 
 
 def make_two_p_dataset(params):
+    random.seed(params.random_seed)
     p1, p2 = params.p1, params.p2
 
     a1_vals = t.arange(p1)

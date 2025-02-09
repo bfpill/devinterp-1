@@ -18,12 +18,6 @@ def get_all_pairs(p, exceptions):
     return set(pairs)
 
 
-def deterministic_shuffle(lst, seed):
-    random.seed(seed)
-    shuffled = lst.copy()
-    random.shuffle(shuffled)
-    return shuffled
-
 def generate_rands(params):
     a, p, num_rands, seed = params.a, params.p, params.num_rands, params.random_seed
     random.seed(seed)
@@ -35,7 +29,7 @@ def generate_rands(params):
     rand_labels = {}
     for i in range(p):
         for j in range(p):
-            rand_labels[(i, j)] = p+1
+            rand_labels[(i, j)] = random.randint(0, p-1)
 
     return list(rands), rand_labels
 
@@ -90,13 +84,6 @@ def train_test_split(dataset, params):
     test_idx = idx[train_len:]
     return [dataset[i] for i in train_idx], [dataset[i] for i in test_idx]
 
-# def make_dataset(p):
-#     data = []
-#     pairs = get_all_pairs(p)
-#     for a, b in pairs:
-#         data.append(((t.tensor(a), t.tensor(b)), t.tensor((a + b) % p)))
-#     return data
-  
   
 # i'm assuming in reality rand coverage is evenly distributed, but maybe too small a slice will leave some out, so this is a may-need
 def count_rands_coverage(train_dataset, test_dataset, params):
@@ -138,20 +125,3 @@ def hash_with_seed(value, seed):
     m.update(str(seed).encode("utf-8"))
     m.update(str(value).encode("utf-8"))
     return int(m.hexdigest(), 16)
-
-
-def make_random_dataset(p, seed, is_commutative=False):
-    data = []
-    pairs = get_all_pairs(p)
-    if is_commutative:
-        for a, b in pairs:
-            out = (a * b * 2 * p) + a + b
-            out = hash_with_seed(out, seed) % p
-            data.append(((t.tensor(a), t.tensor(b)), t.tensor(out)))
-    else:
-        for a, b in pairs:
-            out = 2 * a * p + b 
-            out = hash_with_seed(out, seed) % p
-            data.append(((t.tensor(a), t.tensor(b)), t.tensor(out)))
-    return data
-

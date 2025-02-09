@@ -22,6 +22,7 @@ device = 'mps'
 @dataclass
 class ExperimentParams:
     p: int = 53
+    mem_loss_scaling_const: int = 10
     train_frac: float = 0.8
     hidden_size: int = 32
     lr: float = 0.01
@@ -134,7 +135,7 @@ def train(model, train_dataset, test_dataset, params):
             model.parameters(), weight_decay=params.weight_decay, lr=params.lr
         )
 
-    loss_fn = t.nn.CrossEntropyLoss()
+    loss_fn = t.nn.CrossEntropyLoss(reduction='none')
     idx = list(range(len(train_dataset)))
     avg_loss = 0
 
@@ -145,7 +146,6 @@ def train(model, train_dataset, test_dataset, params):
         checkpoint_every = params.n_batches // params.n_save_model_checkpoints
     checkpoint_no = 0
 
-    mode_loss_history = []
     magnitude_history = []
 
     for i in tqdm(range(params.n_batches)):
@@ -187,10 +187,19 @@ def train(model, train_dataset, test_dataset, params):
         X_1 = t.stack([train_dataset[b][0][0] for b in batch_idx]).to(params.device)
         X_2 = t.stack([train_dataset[b][0][1] for b in batch_idx]).to(params.device)
         Y = t.stack([train_dataset[b][1] for b in batch_idx]).to(params.device)
-        
+
+        exceptions_mask = [(x1.item() % params.a, x2.item() % params.a) in params.rands for x1, x2 in zip(X_1, X_2)]
+        exceptions_indices = [i for i, is_exception in enumerate(exceptions_mask) if is_exception]
+
         optimizer.zero_grad()
         out = model(X_1, X_2)
-        loss = loss_fn(out, Y)
+        
+        loss_all = loss_fn(out, Y)
+        weights = t.ones_like(loss_all)
+        
+        mem_loss_scaling_const = params.mem_loss_scaling_const * (1 + 10*i / params.n_batches)
+        weights[exceptions_indices] = mem_loss_scaling_const
+        loss = (loss_all * weights).mean()
         avg_loss += loss.item()
         loss.backward()
         optimizer.step()
