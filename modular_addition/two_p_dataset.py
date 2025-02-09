@@ -12,37 +12,38 @@ def deterministic_shuffle(lst, seed):
 
 
 def is_held_out(pair):
-    return pair[0] % 2 == 0 and pair[1] % 3 == 0
+    return pair[0] % 5 == 0 and pair[1] % 5 == 0
 
 
 def make_two_p_dataset_with_exceptions(params):
     random.seed(params.random_seed)
     dataset = make_two_p_dataset(params)
-    rands = set()
-    while len(rands) < params.n_rands:
-        x1 = random.randint(0, params.p1 - 1)
-        x2 = random.randint(0, params.p2 - 1)
-        if not is_held_out((x1, x2)):
-            rands.add((x1, x2))
+    # rands = set()
+    # while len(rands) < params.n_rands:
+    #     x1 = random.randint(0, params.p1 - 1)
+    #     x2 = random.randint(0, params.p2 - 1)
+    #     if not is_held_out((x1, x2)):
+    #         rands.add((x1, x2))
 
-    params.rands = list(rands)
+    # params.rands = list(rands)
 
-    print("set rands, ", rands)
+    # print("set rands, ", rands)
     
-    modified_data = []
-    exceptions_data = []
+    # modified_data = []
+    # exceptions_data = []
 
-    for a1, a2, b1, b2, label1, label2 in dataset:
-        if (a1.item(), a2.item()) in rands:
-            label1 = label2
-            exceptions_data.append((a1, a2, b1, b2, label1, label2))
-        modified_data.append((a1, a2, b1, b2, label1, label2))
+    # for a1, a2, b1, b2, label1, label2 in dataset:
+    #     if (a1.item(), a2.item()) in rands:
+    #         label1 = label2
+    #         exceptions_data.append((a1, a2, b1, b2, label1, label2))
+    #     modified_data.append((a1, a2, b1, b2, label1, label2))
 
-    dataset.tensors = tuple(t.tensor(data) for data in zip(*modified_data))
-    exceptions_dataset = TensorDataset(*[t.tensor(data) for data in zip(*exceptions_data)])
+    # dataset.tensors = tuple(t.tensor(data) for data in zip(*modified_data))
+    # exceptions_dataset = TensorDataset(*[t.tensor(data) for data in zip(*exceptions_data)])
 
-    print("Total exceptions", len(exceptions_dataset))
-    return dataset, exceptions_data
+    # print("Total exceptions", len(exceptions_dataset))
+
+    return dataset, dataset
 
 
 def make_two_p_dataset(params):
@@ -60,7 +61,8 @@ def make_two_p_dataset(params):
     label2 = ((a2 + b2) % p2) + p1
 
     dataset = TensorDataset(a1, a2, b1, b2, label1, label2)
-    print("Example entry:", (a1[0].item(), a2[0].item()), (b1[0].item(), b2[0].item()), "labels:", label1[0].item(), label2[0].item())
+    print("Example entry:", (a1[0].item(), a2[0].item()), (b1[0].item(), b2[0].item()), 
+          "labels:", label1[0].item(), label2[0].item())
     print("Dataset size:", len(dataset))
     return dataset
 
@@ -70,7 +72,7 @@ def train_test_split(dataset):
     
     for data in dataset:
         a1, a2, b1, b2, label1, label2 = data
-        if is_held_out((a1, a2)) or is_held_out((b1, b2)):
+        if is_held_out((a1, b1)) or is_held_out((a2, b2)):
             test_data.append(data)
         else:
             train_data.append(data)

@@ -70,7 +70,7 @@ class ExperimentParamsTwoP:
         return ExperimentParamsTwoP(**class_dict)
 
     def get_suffix(self, checkpoint_no=None):
-        suffix = f"P1={self.p1}_P2={self.p2}_{}"
+        suffix = f"P1={self.p1}_P2={self.p2}_nrands_{self.n_rands}"
         
         if self.use_random_dataset:
             suffix = "RANDOM_" + suffix
@@ -163,18 +163,20 @@ def train(model, train_dataset, test_dataset, params, exceptions_dataset=None):
                 if not hasattr(params, 'train_losses'):
                     params.train_losses = []
 
-                loss_p1, loss_p2, acc_p1, acc_p2, k1, k2 = evaluate_model_logits(model, train_dataset, params)
+                loss_p1, loss_p2, acc_p1, acc_p2, k1, k2 = evaluate_model_logits(model, train_dataset, params, max_batches=20)
                 
                 if exceptions_dataset: 
                     excep_loss, excep_acc = evaluate_model_on_dataset(model, exceptions_dataset, params, max_batches=None)
                     print("EXCEPTIONS TOTAL LOSS: ", excep_loss, "ACC: ", excep_acc)
 
-                full_loss, full_acc = evaluate_model_on_dataset(model, train_dataset, params, max_batches=None)
+                full_loss, full_acc = evaluate_model_on_dataset(model, train_dataset, params, max_batches=20)
                 print("TRAIN TOTAL LOSS: ", full_loss, full_acc)
+
+                full_loss, full_acc = evaluate_model_on_dataset(model, test_dataset, params, max_batches=20)
+                print("TEST TOTAL LOSS: ", full_loss, full_acc)
 
                 print(f"""
                       TRAIN SET:
-                      Avg loss total: {avg_loss}, 
                       loss_p1: {loss_p1}, loss_p2: {loss_p2}, 
                       acc_p1: {acc_p1}, acc_p2: {acc_p2}
                       loss exceps: {k1}, acc_exceps: {k2}
@@ -190,10 +192,9 @@ def train(model, train_dataset, test_dataset, params, exceptions_dataset=None):
                     'acc_exceps': k2
                 })
 
-                loss_p1, loss_p2, acc_p1, acc_p2, k1, k2 = evaluate_model_logits(model, test_dataset, params)
+                loss_p1, loss_p2, acc_p1, acc_p2, k1, k2 = evaluate_model_logits(model, test_dataset, params, max_batches=20)
                 print(f"""
                       TEST SET: 
-                      Avg loss total: {avg_loss}, 
                       loss_p1: {loss_p1}, loss_p2: {loss_p2}, 
                       acc_p1: {acc_p1}, acc_p2: {acc_p2}
                       loss exceps: {k1}, acc_exceps: {k2}
